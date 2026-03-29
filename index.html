@@ -339,6 +339,8 @@ body{display:flex;flex-direction:column;max-width:480px;margin:0 auto;position:r
         <span class="month-lbl" id="ml-a">Marzo 2026</span>
         <button class="month-btn" onclick="chMonth(1)">&#8594;</button>
       </div>
+
+      <!-- Resumen ahorro -->
       <div class="card">
         <div class="card-label">Pueden ahorrar este mes</div>
         <div class="card-value teal" id="a-sav">$0</div>
@@ -346,7 +348,64 @@ body{display:flex;flex-direction:column;max-width:480px;margin:0 auto;position:r
       </div>
       <div class="sec">Proyección acumulada</div>
       <div id="timeline" style="margin-bottom:16px"></div>
-      <div class="sec">Consejos</div>
+
+      <!-- Acumulado manual -->
+      <div class="card white" style="margin-bottom:16px">
+        <div class="card-label">Ahorro acumulado total</div>
+        <div style="display:flex;align-items:center;gap:8px;margin-top:4px">
+          <span style="font-size:22px;color:var(--text2)">$</span>
+          <input type="number" id="acumulado-ars" placeholder="0" oninput="saveAcumulado()" style="font-size:22px;font-weight:600;color:var(--teal-400);border:none;background:none;outline:none;width:100%;color:var(--teal-400)"/>
+        </div>
+        <div style="font-size:12px;color:var(--text3);margin-top:4px">Ingresá el total ahorrado hasta hoy para recibir recomendaciones sobre qué hacer con él</div>
+      </div>
+
+      <!-- Agente financiero IA -->
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+        <div class="sec" style="margin:0">🤖 Agente Financiero IA</div>
+        <button onclick="loadFinancialAdvice()" id="refresh-advice-btn" style="padding:5px 12px;background:var(--teal-50);border:0.5px solid var(--teal-200);border-radius:99px;font-size:12px;color:var(--teal-600);cursor:pointer;border:0.5px solid var(--teal-200)">Actualizar</button>
+      </div>
+
+      <div class="alert info" style="font-size:12px;margin-bottom:12px">
+        Perfil: <strong>Moderado</strong> · Objetivo: <strong>8–10% anual en dólares</strong> · Análisis basado en macroeconomía argentina actual
+      </div>
+
+      <!-- Loading state -->
+      <div id="advice-loading" style="text-align:center;padding:32px 16px;display:none">
+        <div style="font-size:32px;margin-bottom:12px;animation:spin 2s linear infinite;display:inline-block">⚙️</div>
+        <div style="font-size:14px;color:var(--text2)">Analizando contexto macroeconómico argentino…</div>
+        <div style="font-size:12px;color:var(--text3);margin-top:4px">Consultando tasas, dólar e inflación</div>
+      </div>
+      <style>@keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}</style>
+
+      <!-- Advice content -->
+      <div id="advice-content" style="display:none">
+
+        <!-- Contexto macro -->
+        <div id="macro-cards" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:16px"></div>
+
+        <!-- Este mes -->
+        <div style="font-size:13px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px">📅 Qué hacer con el ahorro de este mes</div>
+        <div id="advice-this-month" style="margin-bottom:16px"></div>
+
+        <!-- Acumulado -->
+        <div style="font-size:13px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px">💼 Qué hacer con el acumulado</div>
+        <div id="advice-accumulated" style="margin-bottom:16px"></div>
+
+        <!-- Advertencia -->
+        <div class="alert warn" style="font-size:11px;line-height:1.5">
+          ⚠️ Esta información es orientativa y no constituye asesoramiento financiero profesional. Consultá con un asesor certificado antes de invertir.
+        </div>
+
+        <div style="font-size:11px;color:var(--text3);text-align:center;margin-top:8px" id="advice-timestamp"></div>
+      </div>
+
+      <!-- Empty state -->
+      <div id="advice-empty" style="text-align:center;padding:24px 16px;background:var(--bg2);border-radius:var(--radius-lg)">
+        <div style="font-size:32px;margin-bottom:8px">🏦</div>
+        <div style="font-size:14px;color:var(--text2)">Ingresá el sueldo del mes para recibir recomendaciones personalizadas</div>
+      </div>
+
+      <div class="sec">Consejos generales</div>
       <div id="tips"></div>
     </div>
 
@@ -809,6 +868,194 @@ function render(){
 }
 
 setInterval(()=>{if(document.getElementById('app').style.display!=='none')syncNow();},15000);
-</script>
+
+// ── ACUMULADO ─────────────────────────────────────────────────────────
+function saveAcumulado(){
+  const val=parseFloat(document.getElementById('acumulado-ars').value)||0;
+  if(!shared.meta)shared.meta={};shared.meta.acumulado=val;
+  saveToCloud();
+}
+function loadAcumulado(){
+  const val=(shared.meta&&shared.meta.acumulado)||0;
+  const el=document.getElementById('acumulado-ars');if(el)el.value=val||'';
+}
+
+// ── FINANCIAL ADVISOR ────────────────────────────────────────────────
+let adviceLoaded=false;
+
+async function loadFinancialAdvice(){
+  const d=md();
+  const totInc=d.inc1+d.inc2;
+  const immExp=d.expenses.filter(e=>!e.deferred).reduce((s,e)=>s+e.amount,0);
+  const net=Math.max(0,totInc-d.debt);
+  const sav=Math.max(0,net-immExp);
+  const acum=(shared.meta&&shared.meta.acumulado)||0;
+
+  if(totInc===0){
+    document.getElementById('advice-empty').style.display='block';
+    document.getElementById('advice-content').style.display='none';
+    document.getElementById('advice-loading').style.display='none';
+    return;
+  }
+
+  document.getElementById('advice-empty').style.display='none';
+  document.getElementById('advice-content').style.display='none';
+  document.getElementById('advice-loading').style.display='block';
+  document.getElementById('refresh-advice-btn').disabled=true;
+
+  try {
+    const prompt=`Sos un agente financiero experto en el mercado argentino. Analizá la situación macroeconómica argentina ACTUAL de marzo 2026 y dá recomendaciones concretas y accionables para una pareja con el siguiente perfil:
+
+PERFIL DEL INVERSOR:
+- Perfil: Moderado (acepta algo de riesgo para mayor rentabilidad)
+- Objetivo: 8-10% anual en dólares
+- Horizonte: mediano plazo (1-3 años)
+- País: Argentina
+
+SITUACIÓN FINANCIERA DEL MES:
+- Ingreso mensual del hogar: $${Math.round(totInc).toLocaleString('es-AR')} ARS
+- Ahorro disponible este mes: $${Math.round(sav).toLocaleString('es-AR')} ARS
+- Ahorro acumulado total: $${Math.round(acum).toLocaleString('es-AR')} ARS
+
+Respondé ÚNICAMENTE en JSON válido con esta estructura exacta (sin texto extra, sin markdown):
+{
+  "macro": {
+    "dolar_blue": "valor estimado en ARS",
+    "inflacion_mensual": "% estimado",
+    "tasa_plazo_fijo": "% TNA estimado",
+    "contexto": "1 oración sobre el contexto macro actual"
+  },
+  "este_mes": [
+    {
+      "titulo": "nombre del instrumento",
+      "descripcion": "qué es y por qué recomendarlo ahora (2-3 oraciones)",
+      "porcentaje": número entre 0 y 100,
+      "rentabilidad_esperada": "% en dólares estimado anual",
+      "riesgo": "Bajo|Moderado|Alto",
+      "como_hacerlo": "paso a paso concreto de cómo invertir en Argentina hoy"
+    }
+  ],
+  "acumulado": [
+    {
+      "titulo": "nombre del instrumento",
+      "descripcion": "qué hacer con el acumulado y por qué (2-3 oraciones)",
+      "porcentaje": número entre 0 y 100,
+      "rentabilidad_esperada": "% en dólares estimado anual",
+      "riesgo": "Bajo|Moderado|Alto",
+      "como_hacerlo": "paso a paso concreto"
+    }
+  ]
+}
+
+Los porcentajes de "este_mes" deben sumar 100. Los de "acumulado" también deben sumar 100.
+Considerá instrumentos reales disponibles en Argentina como: FCI dólar linked, Obligaciones Negociables en USD, CEDEARs, plazo fijo UVA, billeteras cripto (Lemon/Belo/Buenbit), dólar MEP, cauciones bursátiles, bonos CER, acciones locales, etc.`;
+
+    const response=await fetch('https://api.anthropic.com/v1/messages',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({
+        model:'claude-sonnet-4-20250514',
+        max_tokens:2000,
+        tools:[{type:'web_search_20250305',name:'web_search'}],
+        messages:[{role:'user',content:prompt}]
+      })
+    });
+
+    const data=await response.json();
+    const text=data.content?.filter(i=>i.type==='text').map(i=>i.text).join('');
+    const clean=text.replace(/```json|```/g,'').trim();
+    const parsed=JSON.parse(clean);
+    renderAdvice(parsed,sav,acum);
+  } catch(e) {
+    // Fallback sin web search
+    try {
+      const response2=await fetch('https://api.anthropic.com/v1/messages',{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({
+          model:'claude-sonnet-4-20250514',
+          max_tokens:2000,
+          messages:[{role:'user',content:`Sos un agente financiero experto en el mercado argentino de marzo 2026. Dá recomendaciones para una pareja inversora con perfil MODERADO, objetivo 8-10% anual en USD. Ahorro este mes: $${Math.round(sav).toLocaleString()} ARS. Acumulado: $${Math.round(acum).toLocaleString()} ARS. Respondé SOLO en JSON con estructura: {"macro":{"dolar_blue":"string","inflacion_mensual":"string","tasa_plazo_fijo":"string","contexto":"string"},"este_mes":[{"titulo":"string","descripcion":"string","porcentaje":number,"rentabilidad_esperada":"string","riesgo":"Bajo|Moderado|Alto","como_hacerlo":"string"}],"acumulado":[{"titulo":"string","descripcion":"string","porcentaje":number,"rentabilidad_esperada":"string","riesgo":"Bajo|Moderado|Alto","como_hacerlo":"string"}]}`}]}
+        })
+      });
+      const data2=await response2.json();
+      const text2=data2.content?.filter(i=>i.type==='text').map(i=>i.text).join('');
+      const clean2=text2.replace(/```json|```/g,'').trim();
+      const parsed2=JSON.parse(clean2);
+      renderAdvice(parsed2,sav,acum);
+    } catch(e2){
+      document.getElementById('advice-loading').style.display='none';
+      document.getElementById('advice-content').style.display='block';
+      document.getElementById('advice-this-month').innerHTML='<div class="alert danger" style="font-size:13px">Error al cargar recomendaciones. Verificá tu conexión e intentá de nuevo.</div>';
+      document.getElementById('advice-accumulated').innerHTML='';
+      document.getElementById('macro-cards').innerHTML='';
+    }
+  }
+  document.getElementById('refresh-advice-btn').disabled=false;
+}
+
+function renderAdvice(data,sav,acum){
+  document.getElementById('advice-loading').style.display='none';
+  document.getElementById('advice-content').style.display='block';
+
+  const RISK_COLOR={Bajo:'green',Moderado:'amber',Alto:'coral'};
+  const RISK_BG={Bajo:'var(--green-50)',Moderado:'var(--amber-50)',Alto:'var(--coral-50)'};
+  const RISK_TEXT={Bajo:'var(--green-800)',Moderado:'var(--amber-800)',Alto:'var(--coral-800)'};
+
+  // Macro cards
+  const m=data.macro||{};
+  document.getElementById('macro-cards').innerHTML=`
+    <div class="card" style="margin-bottom:0"><div class="card-label">Dólar blue</div><div style="font-size:20px;font-weight:700;color:var(--blue-400)">${m.dolar_blue||'—'}</div></div>
+    <div class="card" style="margin-bottom:0"><div class="card-label">Inflación mensual</div><div style="font-size:20px;font-weight:700;color:var(--coral-400)">${m.inflacion_mensual||'—'}</div></div>
+    <div class="card" style="margin-bottom:0"><div class="card-label">Plazo fijo TNA</div><div style="font-size:20px;font-weight:700;color:var(--teal-400)">${m.tasa_plazo_fijo||'—'}</div></div>
+    <div class="card" style="margin-bottom:0"><div class="card-label">Contexto</div><div style="font-size:12px;color:var(--text2);line-height:1.4;margin-top:2px">${m.contexto||'—'}</div></div>
+  `;
+
+  function renderItems(items,containerId,totalARS){
+    const el=document.getElementById(containerId);if(!el)return;
+    if(!items||!items.length){el.innerHTML='<div class="alert info" style="font-size:13px">Sin recomendaciones disponibles.</div>';return;}
+    el.innerHTML=items.map(item=>{
+      const pct=item.porcentaje||0;
+      const monto=totalARS>0?Math.round(totalARS*(pct/100)):0;
+      const riesgo=item.riesgo||'Moderado';
+      return`<div style="background:var(--bg);border:0.5px solid var(--border);border-radius:var(--radius-lg);padding:14px 16px;margin-bottom:10px">
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:8px">
+          <div style="font-size:15px;font-weight:600;color:var(--text);flex:1">${item.titulo||'Instrumento'}</div>
+          <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;margin-left:8px">
+            <span style="font-size:16px;font-weight:700;color:var(--teal-400)">${pct}%</span>
+            ${monto>0?`<span style="font-size:11px;color:var(--text3)">${fmt(monto)}</span>`:''}
+          </div>
+        </div>
+        <div style="height:6px;background:var(--bg3);border-radius:99px;overflow:hidden;margin-bottom:10px">
+          <div style="height:100%;width:${pct}%;background:var(--teal-400);border-radius:99px"></div>
+        </div>
+        <div style="display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap">
+          <span style="font-size:11px;padding:3px 8px;border-radius:99px;background:${RISK_BG[riesgo]};color:${RISK_TEXT[riesgo]}">Riesgo ${riesgo}</span>
+          <span style="font-size:11px;padding:3px 8px;border-radius:99px;background:var(--teal-50);color:var(--teal-600)">${item.rentabilidad_esperada||'—'} en USD</span>
+        </div>
+        <div style="font-size:13px;color:var(--text2);line-height:1.5;margin-bottom:10px">${item.descripcion||''}</div>
+        <div style="background:var(--bg2);border-radius:var(--radius);padding:10px 12px">
+          <div style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:0.04em;margin-bottom:4px">Cómo hacerlo</div>
+          <div style="font-size:12px;color:var(--text);line-height:1.5">${item.como_hacerlo||''}</div>
+        </div>
+      </div>`;
+    }).join('');
+  }
+
+  renderItems(data.este_mes,'advice-this-month',sav);
+  renderItems(data.acumulado,'advice-accumulated',acum);
+
+  const now=new Date();
+  document.getElementById('advice-timestamp').textContent=`Análisis generado el ${now.toLocaleDateString('es-AR')} a las ${now.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'})}`;
+  adviceLoaded=true;
+}
+
+// Trigger advice when ahorro tab opens
+const _origShowTab=showTab;
+window.showTab=function(id,el){
+  _origShowTab(id,el);
+  if(id==='ahorro'){loadAcumulado();if(!adviceLoaded)loadFinancialAdvice();}
+};
+
 </body>
 </html>
