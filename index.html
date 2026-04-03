@@ -214,6 +214,7 @@ body{display:flex;flex-direction:column;max-width:480px;margin:0 auto;position:r
 .income-avatar{width:36px;height:36px;border-radius:50%;background:var(--teal-50);display:flex;align-items:center;justify-content:center;font-size:18px;overflow:hidden;flex-shrink:0;}
 .income-avatar img{width:100%;height:100%;object-fit:cover;border-radius:50%;}
 </style>
+<script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
 </head>
 <body>
 
@@ -821,10 +822,9 @@ function renderBanks(){
 }
 
 function deleteBank(id){
-  if(!shared.banks)shared.banks=[];
+  if(!Array.isArray(shared.banks))shared.banks=[];
   shared.banks=shared.banks.filter(b=>b.id!==id);
-  // also remove debits from this bank
-  if(shared.debits)shared.debits=shared.debits.filter(d=>d.bankId!==id);
+  if(Array.isArray(shared.debits))shared.debits=shared.debits.filter(d=>d.bankId!==id);
   renderBanks();renderDebits();render();saveToCloud();
 }
 
@@ -849,7 +849,7 @@ function renderDebits(){
 }
 
 function deleteDebit(id){
-  if(!shared.debits)shared.debits=[];
+  if(!Array.isArray(shared.debits))shared.debits=[];
   shared.debits=shared.debits.filter(d=>d.id!==id);
   renderDebits();render();saveToCloud();
 }
@@ -891,16 +891,23 @@ function hideModal(){document.getElementById('modal').style.display='none';}
 
 function confirmModal(){
   const name=(document.getElementById('m-name')?.value||'').trim();if(!name)return;
-  if(!shared.cats)shared.cats=[...DEFAULT_CATS];
-  if(!shared.pays)shared.pays=[...DEFAULT_PAYS];
-  if(!shared.banks)shared.banks=[];
-  if(!shared.debits)shared.debits=[];
+  // Ensure arrays are real arrays before pushing — core bug fix
+  if(!Array.isArray(shared.cats))shared.cats=JSON.parse(JSON.stringify(DEFAULT_CATS));
+  if(!Array.isArray(shared.pays))shared.pays=JSON.parse(JSON.stringify(DEFAULT_PAYS));
+  if(!Array.isArray(shared.banks))shared.banks=[];
+  if(!Array.isArray(shared.debits))shared.debits=[];
   if(modalMode==='cat'){
     const icon=document.getElementById('m-emoji')?.value.trim()||'🏷️';
-    const id='cat_'+Date.now();shared.cats.push({id,name,icon});selCat=id;
+    const id='cat_'+Date.now();
+    shared.cats.push({id,name,icon});
+    selCat=id;
   }else if(modalMode==='pay'){
     const id='pay_'+Date.now();
-    shared.pays.push({id,name,deferred:!!document.getElementById('m-defer')?.checked,needsBank:!!document.getElementById('m-bank')?.checked});selPay=id;
+    shared.pays.push({id,name,
+      deferred:!!(document.getElementById('m-defer')?.checked),
+      needsBank:!!(document.getElementById('m-bank')?.checked)
+    });
+    selPay=id;
   }else if(modalMode==='bank'){
     const id='bank_'+Date.now();
     shared.banks.push({id,name,owner:document.getElementById('m-owner')?.value||'me'});
@@ -911,32 +918,54 @@ function confirmModal(){
     const id='deb_'+Date.now();
     shared.debits.push({id,name,amount,bankId,catId});
   }
-  hideModal();renderSub('sub-'+modalMode+'s');renderBanks();renderDebits();
-  renderManageCats();renderManagePays();render();saveToCloud();
+  hideModal();
+  renderBanks();renderDebits();renderManageCats();renderManagePays();render();
+  saveToCloud();
 }
 
-function renderManageCats(){const el=document.getElementById('cat-manage');if(!el)return;el.innerHTML=cats().map(c=>`<div class="manage-item"><div class="manage-left">${c.icon} <span>${c.name}</span></div><button class="del-btn" onclick="deleteCat('${c.id}')">🗑</button></div>`).join('');}
-function renderManagePays(){const el=document.getElementById('pay-manage');if(!el)return;el.innerHTML=pays().map(p=>`<div class="manage-item"><div class="manage-left">${p.deferred?'💳':'💵'} <span>${p.name}${p.deferred?' · diferido':''}</span></div><button class="del-btn" onclick="deletePay('${p.id}')">🗑</button></div>`).join('');}
-function deleteCat(id){if(!shared.cats)shared.cats=[...DEFAULT_CATS];shared.cats=shared.cats.filter(c=>c.id!==id);if(selCat===id)selCat=cats()[0]?.id||'';renderManageCats();render();saveToCloud();}
+function renderManageCats(){
+  const el=document.getElementById('cat-manage');if(!el)return;
+  const list=cats();
+  if(!list.length){el.innerHTML='<div style="font-size:13px;color:var(--text3);padding:12px 0;text-align:center">Sin categorías</div>';return;}
+  el.innerHTML=list.map(c=>`<div class="manage-item"><div class="manage-left"><span style="font-size:18px">${c.icon}</span> <span>${c.name}</span></div><button class="del-btn" onclick="deleteCat('${c.id}')">🗑</button></div>`).join('');
+}
+function renderManagePays(){
+  const el=document.getElementById('pay-manage');if(!el)return;
+  const list=pays();
+  if(!list.length){el.innerHTML='<div style="font-size:13px;color:var(--text3);padding:12px 0;text-align:center">Sin medios</div>';return;}
+  el.innerHTML=list.map(p=>`<div class="manage-item"><div class="manage-left"><span>${p.deferred?'💳':'💵'}</span> <span>${p.name}${p.deferred?' <span style=\'font-size:11px;color:var(--text3)\'>· diferido</span>':''}</span></div><button class="del-btn" onclick="deletePay('${p.id}')">🗑</button></div>`).join('');
+}
+function deleteCat(id){
+  if(!Array.isArray(shared.cats))shared.cats=JSON.parse(JSON.stringify(DEFAULT_CATS));
+  shared.cats=shared.cats.filter(c=>c.id!==id);
+  if(selCat===id)selCat=cats()[0]?.id||'';
+  renderManageCats();render();saveToCloud();
+}
 function deletePay(id){if(!shared.pays)shared.pays=[...DEFAULT_PAYS];shared.pays=shared.pays.filter(p=>p.id!==id);if(selPay===id)selPay=pays()[0]?.id||'';renderManagePays();render();saveToCloud();}
 
 // ── QR SCANNER ────────────────────────────────────────────────────────
 async function startQR(){
   try{
-    qrStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}});
-    const video=document.getElementById('qr-video');video.srcObject=qrStream;
+    qrStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment',width:{ideal:1280},height:{ideal:720}}});
+    const video=document.getElementById('qr-video');
+    video.srcObject=qrStream;
+    await video.play();
     document.getElementById('qr-overlay').style.display='flex';
-    // Use BarcodeDetector if available
-    if('BarcodeDetector' in window){
-      const detector=new BarcodeDetector({formats:['qr_code']});
-      qrInterval=setInterval(async()=>{
-        try{const codes=await detector.detect(video);if(codes.length>0){stopQR();handleQRResult(codes[0].rawValue);}}catch(e){}
-      },500);
-    }else{
-      // fallback: show message
-      document.querySelector('.qr-label').textContent='Tu dispositivo no soporta lectura automática de QR. Tomá una foto del ticket en su lugar.';
-    }
-  }catch(e){alert('No se pudo acceder a la cámara: '+e.message);}
+    // Use jsQR (works on Safari/iOS) via canvas scanning
+    const canvas=document.createElement('canvas');
+    const ctx=canvas.getContext('2d');
+    qrInterval=setInterval(()=>{
+      if(video.readyState===video.HAVE_ENOUGH_DATA){
+        canvas.width=video.videoWidth;canvas.height=video.videoHeight;
+        ctx.drawImage(video,0,0,canvas.width,canvas.height);
+        const imgData=ctx.getImageData(0,0,canvas.width,canvas.height);
+        const code=jsQR(imgData.data,imgData.width,imgData.height,{inversionAttempts:'dontInvert'});
+        if(code&&code.data){stopQR();handleQRResult(code.data);}
+      }
+    },300);
+  }catch(e){
+    alert('No se pudo acceder a la cámara. Asegurate de dar permiso en Safari: Ajustes > Safari > Cámara');
+  }
 }
 
 function stopQR(){
